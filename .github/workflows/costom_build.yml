@@ -65,10 +65,10 @@ jobs:
         run: |
           if [ "${{ matrix.arch }}" = "armv7" ]; then
             echo "platform=linux/arm/v7" >> $GITHUB_OUTPUT
-            echo "image_tag=ghcr.io/${{ env.REPO_OWNER }}/home-assistant-armv7:${{ needs.prepare.outputs.version }}" >> $GITHUB_OUTPUT
+            echo "image_tag=ghcr.io/mosuxiao/home-assistant-armv7:${{ needs.prepare.outputs.version }}" >> $GITHUB_OUTPUT
           elif [ "${{ matrix.arch }}" = "aarch64" ]; then
             echo "platform=linux/arm64" >> $GITHUB_OUTPUT
-            echo "image_tag=ghcr.io/${{ env.REPO_OWNER }}/home-assistant-aarch64:${{ needs.prepare.outputs.version }}" >> $GITHUB_OUTPUT
+            echo "image_tag=ghcr.io/mosuxiao/home-assistant-aarch64:${{ needs.prepare.outputs.version }}" >> $GITHUB_OUTPUT
           fi
 
       - name: Build and push by digest
@@ -124,14 +124,14 @@ jobs:
         working-directory: /tmp/digests
         run: |
           docker buildx imagetools create \
-            -t ghcr.io/${{ env.REPO_OWNER }}/home-assistant-rpi4:${{ needs.prepare.outputs.version }} \
+            -t ghcr.io/mosuxiao/home-assistant-rpi4:${{ needs.prepare.outputs.version }} \
             $(cat aarch64-digest)
 
       - name: Create and push manifest for ARMv7 devices
         working-directory: /tmp/digests
         run: |
           docker buildx imagetools create \
-            -t ghcr.io/${{ env.REPO_OWNER }}/home-assistant-armv7:${{ needs.prepare.outputs.version }} \
+            -t ghcr.io/mosuxiao/home-assistant-armv7:${{ needs.prepare.outputs.version }} \
             $(cat armv7-digest)
 
       - name: Create and push latest tag
@@ -139,11 +139,11 @@ jobs:
         working-directory: /tmp/digests
         run: |
           docker buildx imagetools create \
-            -t ghcr.io/${{ env.REPO_OWNER }}/home-assistant-rpi4:latest \
+            -t ghcr.io/mosuxiao/home-assistant-rpi4:latest \
             $(cat aarch64-digest)
             
           docker buildx imagetools create \
-            -t ghcr.io/${{ env.REPO_OWNER }}/home-assistant-armv7:latest \
+            -t ghcr.io/mosuxiao/home-assistant-armv7:latest \
             $(cat armv7-digest)
 
   notify:
@@ -155,5 +155,5 @@ jobs:
         run: |
           echo "✅ Build completed successfully!"
           echo "📦 Images pushed to GHCR:"
-          echo "   ghcr.io/${{ env.REPO_OWNER }}/home-assistant-rpi4:${{ needs.prepare.outputs.version }}"
-          echo "   ghcr.io/${{ env.REPO_OWNER }}/home-assistant-armv7:${{ needs.prepare.outputs.version }}"
+          echo "   ghcr.io/mosuxiao/home-assistant-rpi4:${{ needs.prepare.outputs.version }}"
+          echo "   ghcr.io/mosuxiao/home-assistant-armv7:${{ needs.prepare.outputs.version }}"
