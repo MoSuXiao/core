@@ -78,7 +78,7 @@ jobs:
           context: .
           platforms: ${{ steps.vars.outputs.platform }}
           build-args: |
-            BUILD_FROM=ghcr.io/home-assistant/armv7-base-python:3.13-alpine3.22
+            BUILD_FROM=ghcr.io/home-assistant/${{ matrix.arch }}-base-python:3.13-alpine3.22
             BUILD_ARCH=${{ matrix.arch }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
