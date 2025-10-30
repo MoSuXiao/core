@@ -1,0 +1,159 @@
+name: Custom Multi-Architecture Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag for the image'
+        required: true
+        default: 'custom-build'
+  push:
+    branches:
+      - main
+
+env:
+  DEFAULT_PYTHON: "3.13"
+  REPO_OWNER: ${{ github.repository_owner }}
+
+jobs:
+  prepare:
+    name: Prepare build
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.set_version.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set version
+        id: set_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=$(date +%Y%m%d)-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          fi
+
+  build_arch:
+    name: Build for ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    needs: prepare
+    strategy:
+      matrix:
+        arch:
+          - armv7
+          - aarch64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set architecture-specific variables
+        id: vars
+        run: |
+          if [ "${{ matrix.arch }}" = "armv7" ]; then
+            echo "platform=linux/arm/v7" >> $GITHUB_OUTPUT
+            echo "image_tag=ghcr.io/${{ env.REPO_OWNER }}/home-assistant-armv7:${{ needs.prepare.outputs.version }}" >> $GITHUB_OUTPUT
+          elif [ "${{ matrix.arch }}" = "aarch64" ]; then
+            echo "platform=linux/arm64" >> $GITHUB_OUTPUT
+            echo "image_tag=ghcr.io/${{ env.REPO_OWNER }}/home-assistant-aarch64:${{ needs.prepare.outputs.version }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: ${{ steps.vars.outputs.platform }}
+          build-args: |
+            BUILD_FROM=python:3.13-alpine
+            BUILD_ARCH=${{ matrix.arch }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          outputs: type=image,name=${{ steps.vars.outputs.image_tag }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          echo "${{ steps.vars.outputs.image_tag }}@${digest}" > /tmp/digests/${{ matrix.arch }}-digest
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+
+  merge_manifest:
+    name: Merge manifest for Raspberry Pi
+    runs-on: ubuntu-latest
+    needs: build_arch
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push manifest for Raspberry Pi 4B (aarch64)
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            -t ghcr.io/${{ env.REPO_OWNER }}/home-assistant-rpi4:${{ needs.prepare.outputs.version }} \
+            $(cat aarch64-digest)
+
+      - name: Create and push manifest for ARMv7 devices
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            -t ghcr.io/${{ env.REPO_OWNER }}/home-assistant-armv7:${{ needs.prepare.outputs.version }} \
+            $(cat armv7-digest)
+
+      - name: Create and push latest tag
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.version == 'latest'
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            -t ghcr.io/${{ env.REPO_OWNER }}/home-assistant-rpi4:latest \
+            $(cat aarch64-digest)
+            
+          docker buildx imagetools create \
+            -t ghcr.io/${{ env.REPO_OWNER }}/home-assistant-armv7:latest \
+            $(cat armv7-digest)
+
+  notify:
+    name: Notify on completion
+    runs-on: ubuntu-latest
+    needs: merge_manifest
+    steps:
+      - name: Print completion message
+        run: |
+          echo "✅ Build completed successfully!"
+          echo "📦 Images pushed to GHCR:"
+          echo "   ghcr.io/${{ env.REPO_OWNER }}/home-assistant-rpi4:${{ needs.prepare.outputs.version }}"
+          echo "   ghcr.io/${{ env.REPO_OWNER }}/home-assistant-armv7:${{ needs.prepare.outputs.version }}"
